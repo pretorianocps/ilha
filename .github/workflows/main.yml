@@ -1,0 +1,404 @@
+name: Gerar DMG da Ilha
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Criar os arquivos do projeto
+        run: |
+          mkdir -p "ilha/$(dirname 'Package.swift')"
+          cat > 'ilha/Package.swift' <<'EOF_ILHA'
+          // swift-tools-version:5.3
+          // Ilha — "ilha dinâmica" para macOS 10.15 (Catalina) ou mais novo.
+          import PackageDescription
+
+          let package = Package(
+              name: "Ilha",
+              platforms: [
+                  .macOS(.v10_15)
+              ],
+              targets: [
+                  .target(
+                      name: "Ilha",
+                      path: "Sources/Ilha"
+                  )
+              ]
+          )
+          EOF_ILHA
+          mkdir -p "ilha/$(dirname 'Sources/Ilha/main.swift')"
+          cat > 'ilha/Sources/Ilha/main.swift' <<'EOF_ILHA'
+          import AppKit
+
+          // Ponto de entrada: app sem ícone no Dock (LSUIElement no Info.plist),
+          // com a ilha flutuando no topo da tela e um item na barra de menus para sair.
+          let app = NSApplication.shared
+          let delegate = AppDelegate()
+          app.delegate = delegate
+          app.setActivationPolicy(.accessory)
+          app.run()
+          EOF_ILHA
+          mkdir -p "ilha/$(dirname 'Sources/Ilha/AppDelegate.swift')"
+          cat > 'ilha/Sources/Ilha/AppDelegate.swift' <<'EOF_ILHA'
+          import AppKit
+
+          final class AppDelegate: NSObject, NSApplicationDelegate {
+              private var island: IslandWindowController?
+              private var statusItem: NSStatusItem?
+
+              func applicationDidFinishLaunching(_ notification: Notification) {
+                  island = IslandWindowController()
+                  island?.show()
+                  setupStatusItem()
+
+                  // Reposiciona a ilha quando monitores são ligados/desligados ou a resolução muda.
+                  NotificationCenter.default.addObserver(
+                      self,
+                      selector: #selector(screensChanged),
+                      name: NSApplication.didChangeScreenParametersNotification,
+                      object: nil
+                  )
+              }
+
+              @objc private func screensChanged() {
+                  island?.reposition(animated: false)
+              }
+
+              private func setupStatusItem() {
+                  let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                  item.button?.title = "◉"
+                  item.button?.toolTip = "Ilha"
+
+                  let menu = NSMenu()
+                  let toggle = NSMenuItem(title: "Mostrar/ocultar ilha", action: #selector(toggleIsland), keyEquivalent: "i")
+                  toggle.target = self
+                  menu.addItem(toggle)
+                  menu.addItem(NSMenuItem.separator())
+                  let quit = NSMenuItem(title: "Sair da Ilha", action: #selector(quit), keyEquivalent: "q")
+                  quit.target = self
+                  menu.addItem(quit)
+
+                  item.menu = menu
+                  statusItem = item
+              }
+
+              @objc private func toggleIsland() {
+                  island?.toggleVisibility()
+              }
+
+              @objc private func quit() {
+                  NSApp.terminate(nil)
+              }
+          }
+          EOF_ILHA
+          mkdir -p "ilha/$(dirname 'Sources/Ilha/IslandWindowController.swift')"
+          cat > 'ilha/Sources/Ilha/IslandWindowController.swift' <<'EOF_ILHA'
+          import AppKit
+          import QuartzCore
+
+          /// Controla a janela flutuante da ilha: posição no topo da tela,
+          /// expansão ao passar o mouse e recolhimento ao sair.
+          final class IslandWindowController: NSObject {
+              static let compactSize = NSSize(width: 220, height: 32)
+              static let expandedSize = NSSize(width: 460, height: 160)
+              static let topInset: CGFloat = 3
+
+              private let panel: NSPanel
+              private let islandView: IslandView
+              private(set) var isExpanded = false
+              private var collapseWork: DispatchWorkItem?
+              private var expandWork: DispatchWorkItem?
+
+              override init() {
+                  let rect = NSRect(origin: .zero, size: IslandWindowController.compactSize)
+                  panel = NSPanel(
+                      contentRect: rect,
+                      styleMask: [.borderless, .nonactivatingPanel],
+                      backing: .buffered,
+                      defer: false
+                  )
+                  islandView = IslandView(frame: rect)
+                  super.init()
+
+                  panel.isOpaque = false
+                  panel.backgroundColor = .clear
+                  panel.hasShadow = true
+                  // Acima da barra de menus, em todos os Spaces e sobre apps em tela cheia.
+                  panel.level = .statusBar
+                  panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+                  panel.isMovable = false
+                  panel.hidesOnDeactivate = false
+                  panel.becomesKeyOnlyIfNeeded = true
+                  panel.acceptsMouseMovedEvents = true
+                  panel.contentView = islandView
+
+                  islandView.onHoverChange = { [weak self] inside in
+                      self?.handleHover(inside: inside)
+                  }
+                  islandView.onClick = { [weak self] in
+                      guard let self = self else { return }
+                      self.setExpanded(!self.isExpanded)
+                  }
+              }
+
+              func show() {
+                  reposition(animated: false)
+                  panel.orderFrontRegardless()
+              }
+
+              func toggleVisibility() {
+                  if panel.isVisible {
+                      panel.orderOut(nil)
+                  } else {
+                      show()
+                  }
+              }
+
+              /// A tela com a barra de menus é sempre a primeira da lista.
+              private var targetScreen: NSScreen? {
+                  return NSScreen.screens.first ?? NSScreen.main
+              }
+
+              private func frame(for size: NSSize) -> NSRect {
+                  guard let screen = targetScreen else { return NSRect(origin: .zero, size: size) }
+                  let f = screen.frame
+                  return NSRect(
+                      x: round(f.midX - size.width / 2),
+                      y: f.maxY - size.height - IslandWindowController.topInset,
+                      width: size.width,
+                      height: size.height
+                  )
+              }
+
+              func reposition(animated: Bool) {
+                  let size = isExpanded ? IslandWindowController.expandedSize : IslandWindowController.compactSize
+                  panel.setFrame(frame(for: size), display: true, animate: animated)
+                  islandView.applyState(expanded: isExpanded, animated: false)
+              }
+
+              private func handleHover(inside: Bool) {
+                  if inside {
+                      collapseWork?.cancel()
+                      // Pequeno atraso para não abrir quando o mouse só passa por cima.
+                      let work = DispatchWorkItem { [weak self] in self?.setExpanded(true) }
+                      expandWork = work
+                      DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+                  } else {
+                      expandWork?.cancel()
+                      let work = DispatchWorkItem { [weak self] in self?.setExpanded(false) }
+                      collapseWork = work
+                      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+                  }
+              }
+
+              func setExpanded(_ expanded: Bool) {
+                  guard expanded != isExpanded else { return }
+                  isExpanded = expanded
+                  let size = expanded ? IslandWindowController.expandedSize : IslandWindowController.compactSize
+                  let target = frame(for: size)
+
+                  NSAnimationContext.runAnimationGroup({ context in
+                      context.duration = expanded ? 0.38 : 0.28
+                      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1.0)
+                      context.allowsImplicitAnimation = true
+                      self.panel.animator().setFrame(target, display: true)
+                  }, completionHandler: nil)
+
+                  islandView.applyState(expanded: expanded, animated: true)
+              }
+          }
+          EOF_ILHA
+          mkdir -p "ilha/$(dirname 'Sources/Ilha/IslandView.swift')"
+          cat > 'ilha/Sources/Ilha/IslandView.swift' <<'EOF_ILHA'
+          import AppKit
+          import QuartzCore
+
+          /// Visual da ilha: pílula preta com conteúdo compacto (hora + data)
+          /// e conteúdo expandido (relógio grande + cartões dos próximos módulos).
+          final class IslandView: NSView {
+              var onHoverChange: ((Bool) -> Void)?
+              var onClick: (() -> Void)?
+
+              private let compact = FlippedView()
+              private let expanded = FlippedView()
+
+              // Compacto
+              private let dot = NSView()
+              private let compactTime = IslandView.label(size: 13, weight: .semibold)
+              private let compactRight = IslandView.label(size: 12, weight: .medium, alpha: 0.7)
+
+              // Expandido
+              private let bigTime = IslandView.label(size: 40, weight: .light)
+              private let fullDate = IslandView.label(size: 13, weight: .regular, alpha: 0.7)
+              private let cards: [CardView] = [
+                  CardView(symbol: "☀︎", title: "Tempo", subtitle: "em breve"),
+                  CardView(symbol: "▦", title: "Agenda", subtitle: "em breve"),
+                  CardView(symbol: "♪", title: "Música", subtitle: "em breve"),
+              ]
+
+              private var trackingArea: NSTrackingArea?
+              private var timer: Timer?
+
+              private let timeFormatter: DateFormatter = {
+                  let f = DateFormatter()
+                  f.locale = Locale(identifier: "pt_BR")
+                  f.dateFormat = "HH:mm"
+                  return f
+              }()
+              private let shortDateFormatter: DateFormatter = {
+                  let f = DateFormatter()
+                  f.locale = Locale(identifier: "pt_BR")
+                  f.dateFormat = "EEE d"
+                  return f
+              }()
+              private let fullDateFormatter: DateFormatter = {
+                  let f = DateFormatter()
+                  f.locale = Locale(identifier: "pt_BR")
+                  f.dateFormat = "EEEE, d 'de' MMMM"
+                  return f
+              }()
+
+              override init(frame frameRect: NSRect) {
+                  super.init(frame: frameRect)
+                  wantsLayer = true
+                  layer?.backgroundColor = NSColor.black.cgColor
+                  layer?.masksToBounds = true
+                  layer?.cornerRadius = cornerRadius(expanded: false)
+
+                  dot.wantsLayer = true
+                  dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+                  dot.layer?.cornerRadius = 4
+
+                  compact.addSubview(dot)
+                  compact.addSubview(compactTime)
+                  compact.addSubview(compactRight)
+                  compactRight.alignment = .right
+
+                  bigTime.font = NSFont.monospacedDigitSystemFont(ofSize: 40, weight: .light)
+                  compactTime.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+                  expanded.addSubview(bigTime)
+                  expanded.addSubview(fullDate)
+                  for card in cards { expanded.addSubview(card) }
+
+                  addSubview(expanded)
+                  addSubview(compact)
+
+                  applyState(expanded: false, animated: false)
+                  tick()
+                  let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+                  RunLoop.main.add(t, forMode: .common)
+                  timer = t
+              }
+
+              required init?(coder: NSCoder) {
+                  fatalError("init(coder:) não é usado")
+              }
+
+              deinit {
+                  timer?.invalidate()
+              }
+
+              // MARK: - Estado
+
+              private func cornerRadius(expanded: Bool) -> CGFloat {
+                  return expanded ? 26 : IslandWindowController.compactSize.height / 2
+              }
+
+              func applyState(expanded isExpanded: Bool, animated: Bool) {
+                  let newRadius = cornerRadius(expanded: isExpanded)
+                  if animated, let layer = layer {
+                      let anim = CABasicAnimation(keyPath: "cornerRadius")
+                      anim.fromValue = layer.cornerRadius
+                      anim.toValue = newRadius
+                      anim.duration = isExpanded ? 0.38 : 0.28
+                      layer.add(anim, forKey: "cornerRadius")
+                  }
+                  layer?.cornerRadius = newRadius
+
+                  if animated {
+                      NSAnimationContext.runAnimationGroup({ context in
+                          context.duration = isExpanded ? 0.3 : 0.15
+                          self.compact.animator().alphaValue = isExpanded ? 0 : 1
+                          self.expanded.animator().alphaValue = isExpanded ? 1 : 0
+                      }, completionHandler: nil)
+                  } else {
+                      compact.alphaValue = isExpanded ? 0 : 1
+                      expanded.alphaValue = isExpanded ? 1 : 0
+                  }
+              }
+
+              private func tick() {
+                  let now = Date()
+                  compactTime.stringValue = timeFormatter.string(from: now)
+                  compactRight.stringValue = shortDateFormatter.string(from: now)
+                  bigTime.stringValue = timeFormatter.string(from: now)
+                  fullDate.stringValue = fullDateFormatter.string(from: now).capitalizedFirst
+              }
+
+              // MARK: - Layout (em coordenadas de cima para baixo)
+
+              override func layout() {
+                  super.layout()
+
+                  // O conteúdo compacto acompanha o tamanho atual; o expandido tem tamanho fixo,
+                  // centralizado no topo, e vai sendo revelado conforme a janela cresce.
+                  let c = IslandWindowController.compactSize
+                  compact.frame = NSRect(
+                      x: (bounds.width - c.width) / 2,
+                      y: bounds.height - c.height,
+                      width: c.width,
+                      height: c.height
+                  )
+                  let e = IslandWindowController.expandedSize
+                  expanded.frame = NSRect(
+                      x: (bounds.width - e.width) / 2,
+                      y: bounds.height - e.height,
+                      width: e.width,
+                      height: e.height
+                  )
+
+                  // Compacto
+                  dot.frame = NSRect(x: 16, y: (c.height - 8) / 2, width: 8, height: 8)
+                  compactTime.frame = NSRect(x: 30, y: (c.height - 17) / 2, width: 70, height: 17)
+                  compactRight.frame = NSRect(x: c.width - 16 - 90, y: (c.height - 16) / 2, width: 90, height: 16)
+
+                  // Expandido
+                  bigTime.frame = NSRect(x: 24, y: 30, width: 160, height: 50)
+                  fullDate.frame = NSRect(x: 26, y: 84, width: 170, height: 36)
+                  let cardW: CGFloat = 76, cardH: CGFloat = 104, gap: CGFloat = 10
+                  var x = e.width - 22 - (cardW * CGFloat(cards.count) + gap * CGFloat(cards.count - 1))
+                  for card in cards {
+                      card.frame = NSRect(x: x, y: 32, width: cardW, height: cardH)
+                      x += cardW + gap
+                  }
+              }
+
+              // MARK: - Mouse
+
+              override func updateTrackingAreas() {
+                  super.updateTrackingAreas()
+                  if let area = trackingArea { removeTrackingArea(area) }
+                  let area = NSTrackingArea(
+                      rect: bounds,
+                      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                      owner: self,
+                      userInfo: nil
+                  )
+                  addTrackingArea(area)
+                  trackingArea = area
+              }
+
+              override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
+              override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
+              override func mouseUp(with event: NSEvent) { onClick?() }
+              override func acceptsFirstMouse(for event: NSEvent?) -> Bool { return true }
+
+              // MARK: - Utilidades
+
+              static func label(size: CGFloat, weight: NSFont.Weight, alpha: CGFloat = 1) -> NSTextField {
+                  let l = NSTextField(labelWithString: "")
+                  l.font = NSFont.systemFont(ofSize: size, weight: weight)
+                  l.textColor = NSColor.white.withAlphaComponent(alpha)
