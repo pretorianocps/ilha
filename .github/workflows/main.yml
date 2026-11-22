@@ -10,13 +10,18 @@ jobs:
     steps:
       - name: Baixar o repositório
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extrair o código da Ilha
+      - name: Extrair o código mais recente
         run: |
+          # Usa o arquivo .dat enviado por último, seja qual for o nome dele.
+          ARQ=$(for f in *.dat; do echo "$(git log -1 --format=%ct -- "$f") $f"; done | sort -n | tail -1 | cut -d' ' -f2-)
+          echo "Usando: $ARQ"
           rm -rf ilha
           mkdir ilha
-          unzip -q codigo-ilha.dat -d ilha
-          ls -R ilha
+          unzip -q "$ARQ" -d ilha
+          grep -A1 CFBundleShortVersionString ilha/Resources/Info.plist
 
       - name: Compilar e gerar o DMG
         run: |
