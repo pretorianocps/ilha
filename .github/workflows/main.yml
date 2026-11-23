@@ -30,6 +30,12 @@ jobs:
         env:
           # Senha do certificado do Lume: assinatura fixa, para o macOS não pedir as permissões de novo.
           LUME_CERT_PASSWORD: ${{ secrets.LUME_CERT_PASSWORD }}
+          # Assinatura oficial da Apple (opcional): quando existirem, o DMG sai assinado e notarizado.
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           cd ilha
           chmod +x scripts/*.sh
