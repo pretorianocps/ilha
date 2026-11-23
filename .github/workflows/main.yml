@@ -4,6 +4,10 @@ on:
   push:
   workflow_dispatch:
 
+# Permite publicar a versão nova (o Lume se atualiza sozinho a partir dela).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15-intel
@@ -15,7 +19,6 @@ jobs:
 
       - name: Extrair o código mais recente
         run: |
-          # Usa o arquivo .dat enviado por último, seja qual for o nome dele.
           ARQ=$(for f in *.dat; do echo "$(git log -1 --format=%ct -- "$f") $f"; done | sort -n | tail -1 | cut -d' ' -f2-)
           echo "Usando: $ARQ"
           rm -rf ilha
@@ -26,8 +29,7 @@ jobs:
       - name: Compilar e gerar o DMG
         run: |
           cd ilha
-          swift --version
-          chmod +x scripts/build-dmg.sh
+          chmod +x scripts/*.sh
           ./scripts/build-dmg.sh
 
       - name: Disponibilizar o DMG para download
@@ -35,3 +37,10 @@ jobs:
         with:
           name: Ilha-dmg
           path: ilha/dist/Ilha.dmg
+
+      - name: Publicar a versão (atualização automática)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ilha
+          ./scripts/publish-release.sh
