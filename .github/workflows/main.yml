@@ -27,6 +27,9 @@ jobs:
           grep -A1 CFBundleShortVersionString ilha/Resources/Info.plist
 
       - name: Compilar e gerar o DMG
+        env:
+          # Senha do certificado do Lume: assinatura fixa, para o macOS não pedir as permissões de novo.
+          LUME_CERT_PASSWORD: ${{ secrets.LUME_CERT_PASSWORD }}
         run: |
           cd ilha
           chmod +x scripts/*.sh
