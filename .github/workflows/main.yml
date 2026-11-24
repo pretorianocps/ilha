@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Usar o Xcode mais novo (SDK do macOS 26 para o vidro líquido e a IA no Mac)
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$X" ]; then sudo xcode-select -s "$X"; fi
+          xcodebuild -version | head -1; xcrun --sdk macosx --show-sdk-version
+
       - name: Extrair o código mais recente
         run: |
           ARQ=$(for f in *.dat; do echo "$(git log -1 --format=%ct -- "$f") $f"; done | sort -n | tail -1 | cut -d' ' -f2-)
