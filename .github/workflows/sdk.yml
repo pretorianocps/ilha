@@ -1,0 +1,18 @@
+name: Teste SDK macOS 26
+on:
+  push:
+    branches: [teste-sdk]
+jobs:
+  sdk:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: |
+          sw_vers; uname -m
+          ls /Applications | grep -i xcode || true
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          swift --version
