@@ -4,38 +4,20 @@ on:
     branches: [teste-sdk]
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-26-intel, macos-15-intel]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-26-intel
     steps:
       - uses: actions/checkout@v4
-      - name: Xcode mais novo
+      - name: Testar o ajudante
         run: |
-          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); echo "$X"; sudo xcode-select -s "$X"
-          sw_vers; swift --version; xcrun --sdk macosx --show-sdk-version
-      - name: Compilar (sem publicar)
-        run: |
-          mkdir ilha && unzip -q teste26.dat -d ilha && cd ilha && chmod +x scripts/*.sh
-          set -o pipefail
-          ./scripts/build-dmg.sh 2>&1 | grep -vE "^\[[0-9]+/[0-9]+\] Compiling|^\s*$" | tail -80
-      - name: Conferir o app
-        run: |
-          cd ilha
-          for A in dist/Lume.app dist-cliente/Lume.app; do
-            [ -d "$A" ] || continue
-            echo "== $A"; ls -la "$A/Contents/MacOS"
-            otool -L "$A/Contents/MacOS/Lume" | head -40
-            otool -l "$A/Contents/MacOS/Lume" | grep -A4 LC_BUILD_VERSION | grep -E "minos|sdk"
-            [ -f "$A/Contents/MacOS/lume-local" ] && otool -L "$A/Contents/MacOS/lume-local" && "$A/Contents/MacOS/lume-local" status || echo "status saiu com $?"
-          done
-      - name: Testar a transcrição no Mac
-        run: |
-          cd ilha
-          say -v '?' | grep -i pt_BR || true
-          V=$(say -v '?' | grep -i pt_BR | head -1 | awk '{print $1}')
-          say -v "${V:-Luciana}" -o fala.aiff "Oi Lume, toca uma música bem linda e marca reunião amanhã às três da tarde." || exit 0
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); sudo xcode-select -s "$X"
+          mkdir ilha && unzip -q teste26.dat -d ilha && cd ilha
+          swift build -c release --arch x86_64 --product LumeLocal 2>&1 | grep -E "error|warning: .*LumeLocal|Linking" || true
+          H="$(swift build -c release --arch x86_64 --show-bin-path)/LumeLocal"
+          "$H" status || true
+          say -v Luciana -o fala.aiff "Oi Lume, toca uma música bem linda e marca reunião amanhã às três da tarde."
           afconvert -f WAVE -d LEI16@16000 -c 1 fala.aiff fala.wav
-          time ./dist/Lume.app/Contents/MacOS/lume-local transcrever "$PWD/fala.wav"; echo "saída: $?"
-          echo "Quanto é dois mais dois?" | ./dist/Lume.app/Contents/MacOS/lume-local responder "Responda curto."; echo "saída: $?"
+          ls -la fala.wav
+          for i in 1 2; do
+            start=$(date +%s); "$H" transcrever "$PWD/fala.wav" && echo "ok em $(( $(date +%s) - start ))s" || echo "falhou: $?"
+          done
+          echo "Quanto é dois mais dois?" | "$H" responder "Responda curto." || echo "modelo: $?"
