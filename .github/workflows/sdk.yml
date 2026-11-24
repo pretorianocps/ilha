@@ -13,6 +13,8 @@ jobs:
           mkdir ilha && unzip -q teste26.dat -d ilha && cd ilha
           swift build -c release --arch x86_64 --product LumeLocal 2>&1 | grep -E "error|warning: .*LumeLocal|Linking" || true
           H="$(swift build -c release --arch x86_64 --show-bin-path)/LumeLocal"
+          mkdir -p T.app/Contents/MacOS && cp ilha/Resources/Info.plist T.app/Contents/Info.plist 2>/dev/null || cp Resources/Info.plist T.app/Contents/Info.plist
+          cp "$H" T.app/Contents/MacOS/lume-local && codesign --force --deep --sign - T.app && H="$PWD/T.app/Contents/MacOS/lume-local"
           "$H" status || true
           say -v Luciana -o fala.aiff "Oi Lume, toca uma música bem linda e marca reunião amanhã às três da tarde."
           afconvert -f WAVE -d LEI16@16000 -c 1 fala.aiff fala.wav
